@@ -1,0 +1,178 @@
+---
+title: "SLWR Group Project Part 2"
+output: html_document
+date: "2023-04-01"
+---
+# training Data
+
+```{r}
+hdb <- read.csv("Rm5HDB2023P.csv", stringsAsFactors = TRUE)
+attach(hdb)
+View(hdb)
+
+# for checking 
+sum(is.na(hdb)) # 0 
+```
+
+# Best Subset Selection via 10-fold Cross Validation
+# gave us 36 regressors 
+-> summary(lm(Price~., data = hdb))
+
+```{r}
+RNGkind(sample.kind = "Rounding")
+set.seed(6789)
+
+library(leaps)
+
+# function to predict
+predict.regsubsets <- function(object,newdata,id) {
+	form <- as.formula(object$call[[2]])
+	mat <- model.matrix(form, newdata)
+
+	coefi <- coef(object, id = id)
+	xvars <- names(coefi)
+	mat[,xvars]%*%coefi
+}
+
+k <- 10 # assign the k-fold CV
+folds <- sample(1:k, nrow(hdb), replace = TRUE) # training set 
+cv.errors <- matrix(NA, k, 36, dimnames = list(NULL, paste(1:36))) # 36 independent variables
+
+for (j in 1:k) {
+	best.fit <- regsubsets(Price~., data = hdb[folds!=j,],nvmax = 36) # running the BSS
+	for (i in 1:36) {
+		pred <- predict.regsubsets(best.fit, hdb[folds == j,], id = i) #extracting coefficients and then multiplying them to form the prediction 
+		cv.errors[j,i] <- mean((hdb$Price[folds ==j]-pred)^2) # calculate test MSE
+	}
+}
+
+mean.cv <- apply(cv.errors, 2, mean) #average over the column of the matrix to error for each model 
+mean.cv 
+
+min(mean.cv) # 3446954895
+
+# finding optimal model 
+aa <- which.min(mean.cv)
+aa # 36 
+
+hdb.all <- regsubsets(Price~., data = hdb, nvmax = 36)
+coef(hdb.all, aa)
+```
+```{r}
+#multi Linear model
+#training data 
+RNGkind(sample.kind = "Rounding")
+set.seed(6789)
+train <- sample( 1:nrow(hdb), nrow(hdb)/2)
+test <- -train
+
+
+lm1 <- lm( Price ~., data= Hdb2023P[train,])
+lm.pred <- predict(lm1, Hdb2023P[test,])
+mean((Hdb2023P$Price-lm.pred)^2)
+
+#  32674663975
+```
+
+# Ridge Regression Approach
+
+```{r}
+x <- model.matrix(Price~.,hdb)[,-1]
+
+y <- hdb$Price
+# grid use default
+
+RNGkind(sample.kind = "Rounding")
+set.seed(6789)
+
+library(glmnet)
+
+train <- sample(1:nrow(hdb),nrow(hdb)/2) # half sample
+test <- -train
+
+x.train <- x[train,]
+y.train <- y[train]
+x.test <- x[test,]
+y.test <- y[test]
+
+ridge.mod <- glmnet(x.train,y.train, alpha = 0) # training model; default grid
+
+cvrr.out <- cv.glmnet(x.train,y.train, alpha = 0) 
+bestlam <- cvrr.out$lambda.min # min lambda
+bestlam # 5407.103
+
+# for test model to test for MSE
+ridge.pred <- predict(ridge.mod, s = bestlam, newx = x.test)
+mean((ridge.pred - y.test)^2) # 3975723793
+
+# for general model
+out.rr <- glmnet(x,y, alpha = 0) # general model; default grid
+predict(out.rr, type = "coefficients", s = bestlam) 
+```
+
+# lasso
+
+```{r}
+RNGkind(sample.kind = "Rounding")
+set.seed(6789)
+
+lasso.mod <- glmnet(x.train,y.train, alpha = 1) # training model; default grid
+
+cvlasso.out <- cv.glmnet(x.train,y.train, alpha = 1) 
+bestlam1 <- cvlasso.out$lambda.min # min lambda
+bestlam1 # 38.14604
+
+# for test model to test for MSE
+lasso.pred <- predict(lasso.mod, s = bestlam1, newx = x.test)
+mean((lasso.pred - y.test)^2) # 3547183929
+
+# for general model
+out.lasso <- glmnet(x,y, alpha = 1) # general model; default grid
+lasso.coef <- predict(out.lasso, type = "coefficients", s = bestlam1) 
+lasso.coef[lasso.coef!=0]
+```
+
+# Bagging
+
+```{r}
+RNGkind(sample.kind = "Rounding")
+set.seed(6789)
+library(randomForest)
+
+bag.hdb <- randomForest(Price~., data = hdb, subset = train, mtry = 5, importance = TRUE) # mtry is the number of predictors 
+bag.hdb
+
+yhat.bag <- predict(bag.hdb, newdata = hdb[test,])
+mean((yhat.bag - hdb[test,]$Price)^2)
+```
+
+# RandomForest
+
+```{r}
+RNGkind(sample.kind = "Rounding")
+set.seed(6789)
+library(randomForest)
+
+rf.hdb <- randomForest(Price~., data = hdb, subset = train, mtry = 4, importance = TRUE) # mtry is the number of predictors 
+rf.hdb
+
+yhat.rf <- predict(rf.hdb, newdata = hdb[test,])
+mean((yhat.rf - hdb[test,]$Price)^2) # mtry 5 = 2641712577; mtry 4 = 2628577302
+```
+```{r}
+finmodel<- randomForest(Price~.,data=hdb, mtry=4, importance=TRUE)
+finmodel
+
+```
+
+
+```{r}
+#testing set 
+testset <- read.csv("Rm5HDB2023testP.csv", stringsAsFactors = TRUE)
+testset[,1:5]
+finmodel
+test.pred <-predict(finmodel, newdata=testset[,1:5])
+mean((test.pred-testset$Price)^2)
+
+#2339643383
+```
